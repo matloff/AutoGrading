@@ -1,0 +1,248 @@
+
+# script to semi-automate course grade assignment 
+
+# RUN THIS ONE TO GET THE FINAL GRADES FILE; THEN RUN MakeCSV.R TO
+# CREATE A FILE THAT CAN BE UPLOADED TO THE REGISTRAR
+
+# must be run from the top directory, which has Hwk/, Quizzes/ etc. as
+# immediate subdirectories; inputs from Enrollment/FinalClassList
+
+# see README.courseGrading for details on this file's relation to others
+
+# has some degree of fault tolerance, e.g. checking for missing quizzes
+
+# assumes the following file structure in the current directory:
+
+#    Enrollment/FinalClassList:  output from MakeEnrolledList
+#    Quizzes/Quiz*/Quiz*s:  quiz grades, indexed by e-mail address
+#    Hwk/Grades:  homework grades, indexed by e-mail address
+#    Project/Grades:  project grades, indexed by e-mail address
+#    JobInterviews/Grades:  "job interview" grades, indexed by e-mail
+#       address; if not offered, still need an empty file
+
+# the main function, grader(), will do the following:
+
+#   for each student in FinalClassList, the script will:
+#       form student record line from FinalClassList
+#       read in the quiz grades, and check for missing ones, assigning an
+#          M (Missing, i.e. student skipped it) grade in each such case
+#       read in the homework grades, checking that there are nhwk of them
+#       read in the project grade; does stop() if none found
+#       read in the job interview grade, if any, else NA
+#       append all of the above to the student record line
+#       calculate and append mean quiz GPA (bottom ndrop quizzes dropped,
+#          with job interview replacing next-lowest after ndrop; 
+#          includes "Quiz 0" 
+#       calculate and append mean homework GPA 
+#       calculate and append overall GPA
+#       write extended record to stdout and outfilename
+
+# args to grader():
+
+#    nquiz:  number of quizzes, including group quiz and Quiz 0
+#    nhwk:  number of homework assignments (excluding project)
+#    ndrop:  number of lowest quiz grades to drop
+#    quizwt:  weight in (0,1) for quizzes in course grade
+#    hwkwt:  weight in (0,1) for hwks (including project) in course grade
+#    emailstop:  for debugging; if a bug is appearing for the student
+#                whose e-mail address is this, then call the browser() 
+#                for him/her
+#    rostersep:  field separator within lines, e.g. TAB
+#    jobinterview:  if TRUE, there will be a file JobInterview/Grades
+
+# NOTE:  the syllabus states that the project entails about double the
+# work of a homework assignment, so it counts double; this is hard-coded
+# in gethwkgpa()
+
+# comment lines are allowed in input file , e.g. to note Extra Credit,
+# extenuating circumstances, etc.
+
+# uses strsplit() to separate a single string s into substrings, defined
+# by fields of one OR MORE blanks, including leading and trailing
+# blanks; e.g. " abc  de f" is broken into c("abc","de","f"), with no ""
+# components; if sep is not ' ', just ordinary split
+blanksplit <- function(s,sep) {
+   tmp <- strsplit(s,sep)[[1]]
+   if (sep == '\t') return(paste(tmp))
+   tmp[tmp != ""]
+}
+
+# see above comments
+grader <- function(nhwk,emailstop='',
+      ndrop=2,quizwt=0.70,hwkwt=1-quizwt,rostersep='\t',jobinterview=F) {
+   basedir <- getwd()
+   on.exit(setwd(basedir))
+   setwd('Quizzes')
+   quizDirs <- list.dirs(recursive=F)
+   setwd(basedir)
+   # rm './' at start of dir name, only take dirs of form Quizn
+   qdirs <- NULL
+   for (i in 1:length(quizDirs)) {
+      qdi <- quizDirs[i]
+      if (substr(qdi,1,6) == './Quiz') {
+         qdirs <- c(qdirs,substr(qdi,3,length(qdi)))
+      }
+   }
+   quizDirs <- qdirs
+   nquiz <<- length(quizDirs)
+   if (nquiz > 10) stop("max number of quizzes is 10")
+   outfilename <<- 'FinalGrades'
+   ndrop <<- ndrop
+   quizwt <<- quizwt
+   hwkwt <<- hwkwt
+   emailstop <<- emailstop
+   unlink(outfilename)
+   ilines <- readLines("Enrollment/FinalClassList")
+   f3 <- function(gpa) format(gpa,digits=3)
+   for (iline in ilines) {
+      # skip comment lines
+      if (substr(iline,1,1) == '#') {
+         print(iline)
+         cat(iline,"\n",file=outfilename,append=T)
+         next
+      }
+      ilparts <- blanksplit(iline,rostersep)
+      lil <- length(ilparts)
+      # extract e-mail address, to use as index into records
+      emailaddr <- ilparts[lil]
+      if (emailaddr == emailstop) browser()
+      # get quiz grades; notes missing quizzes too; includes group quiz
+      # (last in the vector) but not Quiz 0 if any
+      iline <- paste(ilparts,collapse=' ')
+      qzs <- getquizgrades(emailaddr,sep=' ')  
+      iline <- paste(iline,Reduce(paste,qzs))
+      hwk <- gethwkgrades(emailaddr,nhwk)  
+      iline <- paste(iline,Reduce(paste,hwk))
+      proj <- getprojgrade(emailaddr)
+      iline <- paste(iline,proj)
+      qgpa <- getquizgpa(qzs,emailaddr,jobinterview)
+      iline <- paste(iline,f3(qgpa))
+      hgpa <- gethwkgpa(hwk,proj)
+      iline <- paste(iline,f3(hgpa))
+      coursegpa <- quizwt * qgpa + hwkwt * hgpa
+      iline <- paste(iline,f3(coursegpa))
+      iline <- blanksplit(iline,rostersep)
+      print(iline)
+      cat(iline,"\n",file=outfilename,append=T)
+   }
+}
+
+getquizgrades <- function(emailaddr,sep) {
+   # remember may have a Quiz 0
+   cmd <- paste("grep",emailaddr,"Quizzes/Q*/Q*s")
+   cmdout <- system(cmd,intern=T)
+   if (length(cmdout) == 0) {
+      msg <- paste("no quizzes found for",emailaddr)
+      print(msg)
+      browser()
+   }
+   # Quiz 0, if any, will be tacked onto the right end
+   grds <- rep("M",nquiz)  # M means missing
+   # go through quizzes, 1 by 1
+   for (cmdi in cmdout) {
+      quiznum <- as.integer(substr(cmdi,13,13))
+      ## quizrange <- (1-quiz0):nquiz
+      ## if (!(quiznum %in% quizrange)) stop("invalid quiz number")
+      # get grade, in the last field
+      qparts <- blanksplit(cmdi,sep)
+      grade <- qparts[length(qparts)]
+      if (!(quiznum == 0)) {
+         grds[quiznum] <- grade
+      } else grds[nquiz] <- grade
+   }
+   numM <- sum(grds == 'M')
+   if (numM > 1) {
+      cmd <- paste0(emailaddr,':  number of M grades was ',numM)
+      warning(cmd)
+   }
+   grds  # will not include Quiz 0, if any
+}
+
+gethwkgrades <- function(emailaddr,nhwk) {
+   cmd <- paste("grep",emailaddr,"Hwk/Grades")
+   cmdout <- system(cmd,intern=T)
+   if (length(cmdout) == 0) {
+      msg <- paste("no hwk found for",emailaddr)
+      print(msg)
+      browser()
+   }
+   # tmp <- strsplit(cmdout,split=" ")[[1]]
+   tmp <- blanksplit(cmdout,sep=',')
+   ltmp <- length(tmp)
+   # hwkstr <- tmp[[ltmp]]
+   # tmp <- strsplit(hwkstr,',')[[1]]
+   # if (length(tmp) != nhwk) {
+   #    msg <- paste("wrong hwk count for",emailaddr)
+   #    print(msg)
+   #    browser()
+   # }
+   # hwkstr
+   paste(tmp[(ltmp-nhwk+1):ltmp])
+}
+
+getprojgrade <- function(emailaddr) {
+   cmd <- paste("grep",emailaddr,"Project/Grades")
+   cmdout <- system(cmd,intern=T)
+   if (length(cmdout) == 0) {
+      msg <- paste("no project found for",emailaddr)
+      stop(msg)
+      return()
+   }
+   # tmp <- strsplit(cmdout,split=" ")[[1]]
+   tmp <- blanksplit(cmdout,' ')
+   ltmp <- length(tmp)
+   tmp[ltmp]
+}
+
+getquizgpa <- function(qzs,emailaddr,jobinterview) {
+   numgrds <- as.numeric(Map(ltrgrdtonumgrd,qzs))
+   numgrds <- as.double(numgrds)
+   numgrds <- sort(numgrds)
+   # remove ndrop lowest letter grades
+   numgrds <- numgrds[-(1:ndrop)]
+   # if (quiz0 && (quiz0grade > numgrds[1]))
+   #    numgrds[1] <- quiz0grade
+   # replace next-lowest one by "job interview" grade, if any (only if
+   # better than 3rd-lowest original grade)
+   if (jobinterview) {
+      cmd <- paste("grep",emailaddr,"JobInterview/Grades")
+      cmdout <- system(cmd,intern=T)
+      if (length(cmdout) > 0) {
+         jiGrade <- blanksplit(cmdout,' ')
+         jiGrade <- jiGrade[length(jiGrade)]
+         numJI <- ltrgrdtonumgrd(jiGrade)
+         # recall that numgrds is already sorted
+         minGrd <- numgrds[1]
+         if (numJI > minGrd) numgrds[1] <- numJI
+      }
+   }
+   mean(numgrds)
+}
+
+# get hwk GPA, including project
+gethwkgpa <- function(hwk,proj) {
+   # project counts double; see above
+   # hp <- paste(hwk,proj,proj,sep=',')  
+   # hp <- strsplit(hp,split=',')[[1]]
+   tmp <- c(hwk,proj,proj)
+   tmp <- gsub(' ','',tmp)
+   numgrds <- vector(length=length(tmp))
+   for (i in 1:length(numgrds)) 
+      numgrds[i] <- ltrgrdtonumgrd(tmp[i])
+   mean(numgrds)
+}
+
+# e.g. A- to 3.7
+ltrgrdtonumgrd <- function(ltrgrd) {
+   ltr <- substr(ltrgrd,1,1)
+   if (ltr == "F" || ltr == "M") return(0)
+   code <- charmatch(ltr,LETTERS) 
+   grdpts <- 5 - code
+   if (nchar(ltrgrd) == 2) {
+      pm <- substr(ltrgrd,2,2)
+      tmp <- if (pm == "+") 0.3 else -0.3
+      grdpts <- grdpts + tmp
+   }
+   grdpts
+}
+

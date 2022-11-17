@@ -1,0 +1,116 @@
+
+utilities
+
+   GetEMailBest.py:  Inputs class roster, outputs e-mail list.
+
+   MailMsg.R:  Mails the message in the given file to the class e-mail list.
+
+grading any exam from OMSI: 
+
+   AutoGradeOMSI.R:  
+
+   latest version in OMSI pkg 
+
+grading group quiz from OMSI: 
+   
+   grade as usual first, up through calling calcltrgrades(); then use
+   OMSIGroupQuiz.R (needs a little tightening)
+
+grading term projects:
+
+   AutoGradeProject.R  NOTE:  need to add option of no UCD suffix
+
+   then use convert() as above
+
+entering "job interview" grades:
+
+   see comments on prep in MailJobIntGrades.R
+
+making course grades:
+
+   create base grades file
+   
+      input roster from Registrar
+      
+      use vim to remove weird "%" chars, via 
+
+                        go to one such char
+                        x
+                        1,$s/^r"//g  ^r is control-r
+    
+      cp to Enrollment/FinalClassList
+
+   make sure directory structure is as shown below
+
+   AutoGradeCourse.R
+
+      which produces FinalGrades
+
+   use vim to put # comment line at top of file, stating how many
+   quizzes, hwks, whether had job interview, etc.
+
+   add course letter grades by vim, taking into account intangibles that may
+   boost their grade, e.g. a good project; tip:  first make wide window,
+   say 150, and do :set textwidth=150
+
+   then when bubbling in the online bubbles, do
+
+      sort -k 3 FinalGrades > alphaFinalGrades
+
+   to make it easier to transcribe
+
+standard directory structure for a course
+
+   Enrollment/: contains rosters and earlier e-mail address files; final
+      roster is in FinalClassList
+
+   EMailList:  e-mail addresses (here and below, including @ucdavis.edu)
+
+   Quiz*/Quiz*des:  quiz grades, indexed by e-mail address; group quiz is 
+      included, Quizn; must be individual grades -- see convert() above
+
+   Hwk/Grades:  homework grades, indexed by e-mail address
+
+   Project/Grades:  project grades, indexed by e-mail address
+
+   JobInterview/Grades:  project grades, indexed by e-mail address
+
+MakeEnrolledList.R:
+
+   forms class list:
+      reads in FinalClassList from Registrar
+      filters for the string " RE " (enrolled)
+      writes ID, name, class level, major, e-mail address to given 
+         file; name has underscores instead of blanks
+      uses write.table() to save
+
+AutoGradeQuiz.R:
+
+   for grading regular quizzes
+
+   short answers
+
+AutoGradeGroupQuiz.R:
+
+   meant for group quizzes, problems where they write full code (or full
+   LaTeX)
+
+AutoGradeCourse.R:
+
+   determines final course grades
+
+   assumes that MakeEnrolledList.R has already been run
+
+CpyAns.csh:
+
+   current directory contains one subdirectory for each student or
+   student group; this script copies the Answers file to those
+   subdirectories so the grading script can be run in them
+
+MailCumulQuizRecs.R, MailHwkRecs.R (VERY IMPORTANT):
+
+   e-mails each student all Test grades I have for him/her, to make sure
+   all records are right
+
+AutoGradeQuiz.R:  grading quizzes turned in to handin
+

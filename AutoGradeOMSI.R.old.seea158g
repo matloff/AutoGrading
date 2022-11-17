@@ -1,0 +1,232 @@
+
+# script to semi-automate grading of OMSI files
+
+# IMPORTANT DIRECTIONS:
+
+# This script will be invoked in a directory that has one subdirectory
+# for each student, which is the form created by OMSI.  The script will
+# descend into each one, grading the student there.  The directory name
+# is the student's full e-mail address.
+
+# The files in a student's directory are named omni_answerx.txt, x =
+# 1,2,3...
+
+# Start by calling grader() in the top directory.  The script will
+# descend into each student subdirectory, and then display the student's
+# answers one by one, asking the grader to assign points.  
+
+# global variables:
+
+#    output: character vector showing the results, one element per
+#            student
+
+# output files:
+
+#    outfile;
+
+#       After each of the calls to grader() and
+#       calcltrgrades(), the R variable output is saved to the file outfile
+#       (in R object format); the latter can be copied to another machine
+#       before calling emailresults().
+
+#    ExamnResults:
+
+#       The results will be placed in a file ExamnResults, where n is 
+#       the exam number, supplied by the instructor when queried by grader().
+
+# usage order:  
+#
+#    call grader() to grade the problems
+#    call calcltrgrades() to compute the letter grades
+#    call emailresults() to mail out the results
+
+
+# uses strsplit() to separate a single string s into substrings, defined
+# by fields of one OR MORE blanks, including leading and trailing
+# blanks; e.g. " abc  de f" is broken into c("abc","de","f"), with no ""
+# components
+blanksplit <- function(s) {
+   tmp <- strsplit(s," ")[[1]]
+   tmp[tmp != ""]
+}
+
+# read students' source file for Problem i
+openstudentsrcfile <- function(i) {
+   src <- problemlist$src[i]
+   srccmd <- paste("source('",src,"')",sep="")
+   tmp <- try(docmd(srccmd))
+   if (class(tmp) == "try-error") {
+      print(paste("can't open ",src,"; note penalty"))
+   }
+}
+
+# close students' source files for Problem i
+# closestudentfiles <- function(i) {
+#    for (src in problemlist$src[[i]]) {
+#       xcmd <- paste("pkill -f ",src)
+#       system(xcmd)
+#    }
+# }
+
+# grade the i-th problem (counting subparts separately), using lines
+# from the student answer file
+gradestudentans <- function(i) {
+   # read students' source file for Problem i
+   openstudentsrcfile(i)  
+   # try to run their code
+   print("running student code")
+   runcmd <- problemlist$run[i]
+   print(paste("trying: ",runcmd))
+   try(docmd(runcmd))
+   # view student file
+   readline(paste("hit Enter when ready to go to text editor"))
+   src <- problemlist$src[i]
+   cmd <- paste("vi ",src)
+   system(cmd)
+   # closestudentfiles(i)
+   # assign score for this problem
+   fullpts <- problemlist$points[i]
+   resp <- readline(paste("pts out of ",fullpts, "? [empty means full pts] "))
+   if (resp == "") fullpts else resp
+}
+
+# find the subdirectories, one for each student group
+getgdirs <- function() {
+   gdirs <- list.dirs(recursive=F)
+   gdirs[gdirs != "."]
+}
+
+# unpack .tar file, find student name, check for proper structure, open
+# PDF file
+unpack <- function(pdf) {
+   tmp <- list.files(pattern=".tar")
+   # should be just one tar file, no further subdirectories
+   if (length(tmp) != 1) {
+      print(paste("problem in subdirectory",getwd())) 
+      return(NULL)
+   }
+   # unpack .tar
+   tarname <- tmp[1]
+   cmd <- paste('system("tar xf ',tarname,'")',sep='')
+   docmd(cmd)
+   # get student name
+   sname <- strsplit(tarname,'.',fixed=TRUE)[[1]][1]
+   # open PDF
+   pdfname <- list.files(pattern=".pdf")[1]
+   pdfcmd <- paste(pdf,pdfname)
+   cmd <- paste('system("',pdfcmd,'")')
+   docmd(cmd)
+   # return student e-mail address
+   sname
+}
+
+# clean up the student's variables etc. so that the next student is not
+# affected
+cleanup <- function(i) {
+   cmd <- problemlist$cleanup[i]
+   if (length(cmd > 0)) docmd(cmd)
+}
+
+grader <- function() {
+   quiznum <- readline("enter quiz number: ") 
+   basedir <- getwd()  # name of top directory
+   gdirs <- getgdirs()  # get student subdirectory names
+   output <<- NULL
+   # go through all subdirectories, one per student
+   for (gdir in gdirs) {  
+      print(paste("entering directory", gdir))
+      setwd(gdir)
+      tmp <- try(
+         {
+         cat("\n\n","  now grading",gdir,"\n")
+         outputline <- NULL
+         scores <- 
+            readline('enter scores, sep by single space,  e.g. 25 45 0: ')
+         total <- sum(Map(as.numeric,strsplit(scores,' '))[[1]])
+         outputline <- scores
+         penalty <- readline("penalty, e.g. late [0]:  ") 
+         penalty <- if (penalty == "") 0 else as.integer(penalty)
+         total <- total - penalty
+         outputline <- paste(outputline,"penalty =",penalty)
+         outputline <- paste(outputline,"total =",total)
+         studentline <- paste(sname,outputline,sep=' ')
+         print(studentline)
+         output <- c(output,studentline)
+         }
+      )
+      if (is.null(tmp)) {
+         print(paste("unpack() had problems in: ", gdir))
+         print("giving up; note penalty, grade separately later")
+         next;
+      }
+      setwd(basedir)
+   }
+   repeat {
+      if (readline("need to edit? ") == "y") {
+         output <<- edit(output)
+      } else break
+   }
+   cat("\n","results:","\n")
+   save(output,file="outfile")
+   for (i in 1:length(output)) {
+      cat(output[i],"\n")
+   }
+}
+
+calcltrgrades <- function() {
+   load("outfile")  # load file named 'output', one line per student
+   tmp <- readline("enter cutoffs (none for F), e.g. 95 A+ 85 A 70 B...: ")
+   tmp <- strsplit(tmp," ")[[1]]
+   inds <- 1:length(tmp)
+   evens <- inds[inds %% 2 == 0]
+   odds <- inds[inds %% 2 == 1]
+   ltrgrades <- tmp[evens]
+   cutoffs <- as.integer(tmp[odds])
+   totcol <- length(blanksplit(output[1])) 
+   # now go through all the students, assigning letters grades to each,
+   # and appending the letter grade for a student to the student's line
+   for (i in 1:length(output)) {
+      total <- blanksplit(output[i])[totcol]
+      total <- as.integer(total)
+      ltrgrd <- num2ltr(total,cutoffs,ltrgrades)
+      output[i] <- paste(output[i],ltrgrd)
+   }
+   # save to file for records
+   save(output,file="outfile")
+   write(output,file="QuizGrades")
+   cat("\n","  letter grade results:","\n")
+   for (i in 1:length(output)) {
+      cat(output[i],"\n")
+   }
+   print("if not in office, upload outfile, GroupQuizGrades, RunCmdsGrpQuiz, .tex")
+}
+
+emailresults <- function() {
+   load("outfile")
+   for (l in output) {
+      tmp <- strsplit(l," ")[[1]]
+      emailaddr <- tmp[1]
+      # emailaddr <- paste(emailaddr,"@ucdavis.edu",sep="")
+      cat(l,file="onestudent")
+      tosend <- paste("mutt",emailaddr,"-s 'quiz results' < onestudent")
+      system(tosend)
+      # print(tosend)
+      print(l)
+      system("sleep 10")
+      system("/bin/rm onestudent")
+   }
+}
+
+# determines the letter gradeoff, based on the cutoffs cuts,lgs
+num2ltr <- function(tot,cuts,lgs) {
+   for (i in 1:length(cuts)) {
+      if (tot >= cuts[i]) return(lgs[i])
+   }
+   return("F")
+}
+
+# do quoted command cmd
+docmd <- function(cmd) {
+   eval(parse(text=cmd))
+}
+

@@ -1,0 +1,35 @@
+
+Note that all files are indexed by official student e-mail address.
+
+"Top directory" is the one with Hwk/, Quizzes/ etc. as immediate
+sudbdirectories.
+
+Hwk/Grades: Each line must contain e-mail address, and grades after a
+final blank, comma-separated, e.g. 
+
+   Joe joesmith B,A-,B+
+
+Quizzes/:  Subdirectories are Quiz1/, Quiz2/ etc., and maybe Quiz0/ for
+"OMSI get-acquainted" quiz.  Within each subdirectory, QuiznGrades file.
+
+1.  Make finalgrades file, Enrollment/FinalClassList:
+
+a.  Download class list from Registrar site.
+
+b.  Extract the relevant columns via ExtractCols.py, forming
+finalgrades.  Make sure e-mail address does NOT have @ucdavis.edu.
+
+c.  Add # comment lines at top, stating how many quizzes there were, etc.
+Also add comment lines re Extra Credit, interesting notes etc.
+
+2.  Should have files Hwk/Grades, Project/Grades and JobInterview/Grades
+(even if latter is blank, due to no job interview).
+
+3.  Ready to run AutoGradeCourse.R!  Must run from top directory.
+Will output the expanded FinalClassList file, in FinalGrades in this
+directory.
+
+4.  Download Registrar's .csv file, then run ConvertToRegistrar.R on it
+and my grades file, to produce updated Registrar's .csv file.  Upload
+the latter to the Registrar's site.
+

@@ -1,0 +1,8 @@
+Script started on 2020-03-21 21:37:26-0700
+[4mnm-500-467c[24m:[1m~/AutoGrading[0m> xpdf ../Toulouse.pdf 
+[1] 4652
+[4mnm-500-467c[24m:[1m~/AutoGrading[0m> e
+[1]    Done                          xpdf ../Toulouse.pdf
+exit
+
+Script done on 2020-03-21 21:37:37-0700

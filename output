@@ -1,0 +1,33 @@
+
+JM some good; AK same; DW pretty good; RU some good;;nice exploratory
+graphics; nice overall analysis
+A-
+
+asingleton.tytliu.blmooney.facastro 
+FC not much; TL LaTex error (on '<'), misstatements; AS very weak,
+didn't even
+quote any p-values; BM LaTeX error, said n = 5 was problem even though p
+< 0.001;
+no lm() in their code; kNN usage odd
+B
+
+rgputri.atwoodward.almiller.mkdonnelly
+had subdirectories; AW not much; RP some good, some mistatements; AM had
+some good points but somet mistatements; MM good;
+very nice code; noted weathersit only 1:3 not 4
+A
+
+atjayaram.sgarimella.svgrossarth.mkheer
+had a subdir; MH not much; Spencer some good; Sanjay misstatements; Atul
+some good, some mistatements; ;used p-values for feature select; nice
+graphics
+B+
+a
+
+bxin
+ .R file incomplete; BX some good, some mistatements; TL too; TY too; VZ
+ LaTeX error, misstatements;;analysis seems good but is unclear, and the
+ .R file, being;incomplete, doesn't clarify"
+A-
+
+

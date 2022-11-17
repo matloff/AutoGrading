@@ -1,0 +1,246 @@
+
+# script to semi-automate course grades 
+
+# IMPORTANT DIRECTIONS:
+
+# This script will be invoked from the "home directory" containing my
+# records for the course.  There should be a Gradesx file in this
+# directory, and then subdirectories for the various gradable components
+# of the course, e.g. one subdirectory for each quiz.
+
+# The Gradesx file in the home directory will have comment lines at the
+# top that give the weights of the components, marked by the word
+# "component."  In the case of quizzes, the total weight for all quizzes
+# as a whole is given and the number of the lowest-grade quizzes to be
+# discarded.  
+
+# For example:
+
+# component Quiz1/Quiz1Grades 0.45 2
+# component Quiz2/Quiz2Grades 0.45 2
+# component Quiz3/Quiz3Grades 0.45 2
+# component Quiz4/Quiz4Grades 0.45 2
+# component Quiz5/Quiz5Grades 0.45 2
+# component Quiz6/Quiz6Grades 0.45 2
+# component QuizGroup/GroupQuizGrades 0.45 2
+# component Midterm/QuizMidtermGrades 0.30
+# component Hwk/HwkGrades -0.20
+# component Project/ProjectGrades 0.05
+
+# Here the total homework grade counts as 0.25 of the course grade.
+# There were 4 regular homework assignments and the project, breaking
+# the 0.25 down to 0.20 and 0.05.  There were 4 quizzes.  Among them,
+# the 2 lowest grades will be discarded, and the rest will be averaged
+# (where e.g. B+ means 3.3); the result will count 0.45 of the course
+# grade.
+
+# The - sign in -0.20 in the above example is a flag indicating that the
+# final average grade in this component needs to be computed.  The
+# format of a noncommented line in such a file is
+#
+#    studentemailaddr grade1 grade2 ...
+#
+# with the gradei being letter grades.  They will be averaged, then
+# rounded to an overall letter grade.  This will be referred to as AVG.
+
+# The script uses the student's UCD e-mail address (minus the
+# @ucdavis.edu) as an index for everthing.  An outline of how grader()
+# works is:
+
+#   open gradesfile
+#   infer the number of quizzes, and the number of other components
+#   for each noncomment line in gradesfile:
+#      em = student's e-mail address
+#      grades = NULL
+#      for each quiz file:
+#         find a line, if any, beginning with em
+#         if found: grade = last field of the line
+#         else: grade = F
+#         grades = c(grades,grade)
+#      discard lowest 2 quizzes and calc overall quiz average
+#      for each other component:
+#         find a line, if any, beginning with em
+#         if found: grade = last field of the line
+#         else: grade = F
+#      output component grades, overall average and overall numeric
+#         grade to stdout and to Gradesx.full
+
+# To use:  The Gradesx file is specified in your call to grader().  It
+# Then manually edit Gradesx.full, to raise some grades due to extra
+# credit etc.
+
+# globals:
+#    gradesfilelines  -- lines from Gradesx
+#    info  --  list: 
+#              nquizzes 
+#              ndiscard 
+#              quizfiles 
+#              nnonquizzes 
+#              nonquizfiles
+#              weights 
+
+initinfo <- function() {
+   nq <- 0  # number of quizzes
+   nnq <- 0  # number of nonquiz components 
+   qf <- NULL  # quiz grade file names
+   nqf <- NULL  # nonquiz grade file names
+   wts <- NULL  # weights of the components
+   for (gline in gradesfilelines) {
+      if (is.comment(gline)) {
+         fields <- blanksplit(gline)
+         if (length(fields) > 1) {
+            if (fields[2] == "component") {
+               if (length(fields) == 5) {  # quiz
+                  nq <- nq + 1
+                  if (nq == 1) {
+                     wts[1] <- as.double(fields[4])
+                     nd <- as.integer(fields[5])
+                  }
+                  qf <- c(qf,fields[3])
+               } else {  # nonquiz
+                  nnq <- nnq + 1
+                  wts[1+nnq] <- as.double(fields[4])
+                  nqf <- c(nqf,fields[3])
+               }
+            }
+         }
+      }
+   }
+   info <<- list(nquizzes=nq, ndiscard=nd, quizfiles=qf,
+      nnonquizzes=nnq, nonquizfiles=nqf, weights = wts)
+}
+
+grader <- function(gradesfile) {
+   gradesfilelines <<- readlines(gradesfile)
+   initinfo()  
+   outfile <- paste(gradesfile,".full",sep="")
+   system(paste("/bin/rm",outfile))
+   for (gline in gradesfilelines) {
+      if (!is.comment(gline)) {
+         tmp <- blanksplit(gline)
+         student <- tmp[length(tmp)]
+         qgrade <- calcquizgrade(student)
+         gline <- paste(gline,qgrade)
+         numgrd <- info$weights[1] * qgrade
+         for (i in 1:info$nnonquiz) {
+            grdfile <- info$nonquizfiles[i]
+            wt <- info$weights[1+i] 
+            nqgrade <- calcnonquizgrade(student,grdfile,wt)
+            gline <- paste(gline,nqgrade)
+            numgrd <- numgrd + abs(wt) * nqgrade
+         }
+         gline <- paste(gline,numgrd)
+         ltrgrd <- numgrdtoltrgrd(numgrd)
+         gline <- paste(gline,ltrgrd)
+      }
+      print(gline)
+      cat(gline,"\n",file=outfile,append=T,sep="")
+   }
+}
+
+calcquizgrade <- function(student) {
+   numgrd <- NULL
+   for (qfile in info$quizfiles) {
+      grd <- getgrade(student,qfile)
+      numgrd <- c(numgrd,ltrgrdtonumgrd(grd))
+   }
+   numgrd <- sort(numgrd)
+   d <- info$ndiscard
+   numgrd <- numgrd[(d+1):length(numgrd)]
+   mean(numgrd)
+}
+
+calcnonquizgrade <- function(student,grdfile,wt) {
+   grd <- getgrade(student,grdfile,wt)
+   if (wt > 0)
+      return(ltrgrdtonumgrd(grd))
+   grd
+}
+
+getgrade <- function(student,grdfile,wt=1) {
+   grdlines <- readlines(grdfile)
+   for (gline in grdlines) {
+      fields <- blanksplit(gline)
+      if (fields[1] == student) {
+         if (wt < 0) {
+            tmp <- Map(ltrgrdtonumgrd,fields[-2:-1])
+            return(Reduce(sum,tmp) / length(tmp))
+         }
+         return(fields[length(fields)])
+      }
+   }
+   print(paste(student,grdfile,"missing"))
+   return(if (wt > 0) "F" else 0)
+}
+
+# meanltr <- function(ltrgrds) {
+#    numgrds <- Map(ltrgrdtonumgrd,ltrgrds)
+#    mean(numgrds)
+# }
+
+# e.g. A- to 3.7
+ltrgrdtonumgrd <- function(ltrgrd) {
+   ltr <- substr(ltrgrd,1,1)
+   if (ltr == "F") return(0)
+   code <- charmatch(ltr,LETTERS) 
+   grdpts <- 5 - code
+   if (nchar(ltrgrd) == 2) {
+      pm <- substr(ltrgrd,2,2)
+      tmp <- if (pm == "+") 0.3 else -0.3
+      grdpts <- grdpts + tmp
+   }
+   grdpts
+}
+
+# using scale from Syllabus:  
+#   (n-1).6+ yields grade n-
+#   (n-1).85+ yields grade n
+#   n.2+ yields grade n+
+numgrdtoltrgrd <- function(numgrd) {
+   lgrds <- c("F","D","C","B","A")
+   flr <- floor(numgrd)
+   if (numgrd - flr < 0.2) 
+      return(lgrds[flr+1])
+   if (numgrd - flr < 0.6) 
+      return(paste(lgrds[flr+1],"+",sep=""))
+   if (numgrd - flr >= 0.85) 
+      return(lgrds[flr+2])
+   return(paste(lgrds[flr+2],"-",sep=""))
+}
+
+# argument is the Gradesx.full file output from the grade calculations
+emailresults <- function(fullgradesfile) {
+   gradelines <- readlines(fullgradesfile)
+   for (l in gradelines) {
+      if (!is.comment(l)) {
+         tmp <- blanksplit(l)
+         reposition <- which(tmp=="RE")[1]
+         emailaddr <- tmp[reposition+1]
+         emailaddr <- paste(emailaddr,"@ucdavis.edu",sep="")
+         cat(l,file="onestudent")
+         tosend <- 
+            paste("mutt",emailaddr,"-s 'course grades' < onestudent")
+         system(tosend)
+         print(tosend)
+         system("sleep 10")
+         system("/bin/rm onestudent")
+      }
+   }
+}
+
+# uses strsplit() to separate a single string s into substrings, defined
+# by fields of one OR MORE blanks, including leading and trailing
+# blanks; e.g. " abc  de f" is broken into c("abc","de","f"), with no ""
+# components
+blanksplit <- function(s) {
+   tmp <- strsplit(s," ")[[1]]
+   tmp[tmp != ""]
+}
+
+# tests whehter textline is a comment line
+is.comment <- function(textline) (substr(textline,1,1) == "#")
+
+# opens the given file, return character vector, one element per line
+readlines <- function(infile) {
+   scan(file=infile,what="",sep="\n",quiet=T)
+}

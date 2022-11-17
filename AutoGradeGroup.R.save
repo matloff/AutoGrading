@@ -1,0 +1,319 @@
+
+# script to semi-automate group quiz (full code submitted) grading of
+# programming problems
+
+# IMPORTANT DIRECTIONS:
+
+# This script will be invoked in a directory that has one subdirectory
+# for each group, which is the form created by the CSIF handin program.
+# The script will descend into each one, grading the group there.
+
+# The student group's file must be named in the format groupnames.tar,
+# where groupnames consists of the students' UCD e-mail addresses (minus
+# the "@ucdavis.edu"), separated by periods.  There must be no
+# subdirectories archived within the file.
+
+# Within the tar file, the group's source files must have exactly the 
+# same names as specified in the quiz.
+
+# Penalties may be imposed for failure to follow directions.  
+
+# The instructor places a file, RunCmdsGrpQuiz, in the current
+# directory, of the following form.  There are 3 lines for each problem
+# on the quiz:
+
+#    problem number and points, e.g. #2 10 
+
+#    source file name (1), to be read into text editor
+
+#    one line of run commands; for non-R code, these will rely on R's
+#    system() call; one might even interface the C/C++ to R and call
+#    from there; good to put cleanup in there too, e.g. rm(x), so as not
+#    to confuse the next problem; be sure to use print() to display the
+#    results!
+
+# Any line in RunCmdsGrpQuiz starting with ## is a comment, and is
+# ignored; one can mention things like auxiliary files needed by the
+# student code, provided by the instructor, or other special
+# instructions, such as need to set global variables (see below)
+
+# The script first looks for a file Globals.R, which initializes globals
+# if any that are needed to run the student code.  
+
+# Optionally, the instructor places a file Removals in the directory. to
+# be executed after each student grading is done.  Each listed object is
+# removed, so as to avoid having one student use the functions provided
+# by the previous one.  Must be just 1 line.  Example: 
+
+#   function1 x y
+# 
+# problems must be numbered 1, 2, 3..., no (a), (b) etc.
+
+# usage order:  
+#
+#    compose the file Globals.R if have anyglobal that might be needed 
+#    for some of the problems 
+#    call grader() to grade the problems
+#    call calcltrgrades() to compute the letter grades
+#    call emailresults() to mail out the results
+#
+#    one of the output files will be named QuizGroup, containing the
+#    full results
+#
+#    important note: after each of the calls to grader() and
+#    calcltrgrades(), the R variable output is saved to the file outfile
+#    (in R object format); the latter can be copied to another machine
+#    before calling emailresults()
+
+# globals:
+#
+#    problemlist:  data read in from the official RunCmdsGrpQuiz file
+#    output:  quiz results minus letter grades
+#    removalvars:  objects to be removed after each student grading 
+#                  is done (see Removals above) 
+# note that in case of a crash of some kind, the global variable output
+# serves as a checkpoint, so that one need not start again from scratch
+
+# uses strsplit() to separate a single string s into substrings, defined
+# by fields of one OR MORE blanks, including leading and trailing
+# blanks; e.g. " abc  de f" is broken into c("abc","de","f"), with no ""
+# components
+blanksplit <- function(s) {
+   tmp <- strsplit(s," ")[[1]]
+   tmp[tmp != ""]
+}
+
+readcmdsfile <- function() {
+   problemlist <<- list()
+   lines <- scan(file="RunCmdsGrpQuiz",what="",sep="\n",quiet=T)
+   # remove comments
+   lines <- lines[substr(lines,1,2) != "##"]
+   nproblems <- length(lines) / 3
+   problemlist$nproblems <<- nproblems
+   # i-th element will be point total for the i-th problem
+   problemlist$points <<- vector(mode="integer",length=nproblems)
+   # i-th element will be a vector of source file names
+   problemlist$src <<- vector(mode="character",length=nproblems)
+   # i-th element will be a run string
+   problemlist$run <<- vector(mode="character",length=nproblems)
+   for (i in 1:problemlist$nproblems) {
+      l <- lines[3*i-2]
+      problemlist$points[i] <<- strsplit(l," ")[[1]][2]
+      problemlist$src[i] <<- lines[3*i-1]
+      problemlist$run[i] <<- lines[3*i]
+   }
+}
+
+# read students' source file for Problem i
+openstudentsrcfile <- function(i) {
+   src <- problemlist$src[i]
+   srccmd <- paste("source('",src,"')",sep="")
+   tmp <- try(docmd(srccmd))
+   if (class(tmp) == "try-error") {
+      print(paste("can't open ",src,"; note penalty"))
+   }
+}
+
+# close students' source files for Problem i
+# closestudentfiles <- function(i) {
+#    for (src in problemlist$src[[i]]) {
+#       xcmd <- paste("pkill -f ",src)
+#       system(xcmd)
+#    }
+# }
+
+# grade the i-th problem (counting subparts separately), using lines
+# from the student answer file
+gradestudentans <- function(i) {
+   # read students' source file for Problem i
+   openstudentsrcfile(i)  
+   # try to run their code
+   print("running student code")
+   runcmd <- problemlist$run[i]
+   print(paste("trying: ",runcmd))
+   try(docmd(runcmd))
+   # view student file
+   readline(paste("hit Enter when ready to go to text editor"))
+   src <- problemlist$src[i]
+   cmd <- paste("vi ",src)
+   system(cmd)
+   # closestudentfiles(i)
+   # assign score for this problem
+   fullpts <- problemlist$points[i]
+   resp <- readline(paste("pts out of ",fullpts, "? [empty means full pts] "))
+   if (resp == "") fullpts else resp
+}
+
+# find the subdirectories, one for each student group
+getgdirs <- function() {
+   gdirs <- list.dirs(recursive=F)
+   gdirs[gdirs != "."]
+}
+
+# unpack .tar file, find student names, check for proper structure
+unpack <- function() {
+   tmp <- list.files(pattern=".tar")
+   # should be just one tar file, no further subdirectories
+   if (length(tmp) != 1) {
+      print(paste("problem in subdirectory",getwd())) 
+      return(NULL)
+   }
+   grpname <- tmp[1]
+   tmp <- grpname
+   ntmp <- nchar(tmp)
+   # not a .tar file?
+   if (substr(tmp,ntmp-3,ntmp) != ".tar") {
+      print(paste("problem in subdirectory",getwd())) 
+      return(NULL)
+   }
+   # unpack the students' tar file
+   system("tar xf *.tar")
+   grpname <- substr(tmp,1,ntmp-4)
+   emailaddrs <- strsplit(grpname,".",fixed=T)
+   list(grpname=grpname, emailaddrs=emailaddrs)
+}
+
+grader <- function() {
+   readcmdsfile()  # read RunCmdsGrpQuiz file
+   # read globals, if any
+   if (file.exists("Globals.R")) source("Globals.R")
+   if (file.exists("Removals")) {
+      removalvars <<- scan("Removals","")
+   }
+   basedir <- getwd()
+   gdirs <- getgdirs()  # get group subdirectory names
+   output <<- NULL
+   # go through all subdirectories. one per group
+   for (gdir in list.dirs(recursive=F)) {  
+      print(paste("entering directory", gdir))
+      setwd(gdir)
+      # try to open this group's .tar file, check for subdirectories
+      # (not allowed`), get student naumes etc.
+      tmp <- unpack()
+      if (is.null(tmp)) {
+         print(paste("unpack() had problems in: ", gdir))
+         print("giving up; note penalty, grade separately later")
+         setwd(basedir)
+         next;
+      }
+      # original tar file name, without ".tar"
+      grpname <- tmp$grpname
+      # vector of individual e-mail addresses, without @ucdavis.edu
+      emailaddrs <- tmp$emailaddrs
+      cat("\n\n","  now grading",grpname,"\n")
+      total <- 0
+      outputline <- NULL
+      for (i in 1:problemlist$nproblems) {
+         score <- gradestudentans(i)
+         outputline <- 
+            paste(outputline," ", score,"/",problemlist$points[i],sep="")
+         total <- total + as.integer(score)
+      }
+      if (!is.null(removalvars)) {
+         for (obj in removalvars) {
+            cmd <- paste("rm(",obj,",env=.GlobalEnv)",sep="")
+            try(docmd(cmd))
+         }
+      }
+      penalty <- 0
+      # penalty <- readline("penalty, e.g. late [0]:  ") 
+      # penalty <- if (penalty == "") 0 else as.integer(penalty)
+      # total <- total - penalty
+      outputline <- paste(outputline,"penalty =",penalty)
+      outputline <- paste(outputline,"total =",total)
+      for (emaddr in emailaddrs[[1]]) {
+         studentline <- paste(emaddr,outputline)
+         output <<- c(output,studentline)
+      }
+      print(output)
+      setwd(basedir)
+   }
+   repeat {
+      if (readline("need to edit? ") == "y") {
+         output <<- edit(output)
+      } else break
+   }
+   cat("\n","results:","\n")
+   save(output,file="outfile")
+   for (i in 1:length(output)) {
+      cat(output[i],"\n")
+   }
+}
+
+calcltrgrades <- function() {
+   load("outfile")
+   tmp <- readline("enter cutoffs (none for F), e.g. 95 A+ 85 A 70 B...: ")
+   tmp <- strsplit(tmp," ")[[1]]
+   inds <- 1:length(tmp)
+   evens <- inds[inds %% 2 == 0]
+   odds <- inds[inds %% 2 == 1]
+   ltrgrades <- tmp[evens]
+   cutoffs <- as.integer(tmp[odds])
+   # totcol <- length(strsplit(output[1]," ")[[1]]) 
+   totcol <- length(blanksplit(output[1])) 
+   for (i in 1:length(output)) {
+      # total <- strsplit(output[i]," ")[[1]][totcol]
+      total <- blanksplit(output[i])[totcol]
+      total <- as.integer(total)
+      ltrgrd <- num2ltr(total,cutoffs,ltrgrades)
+      output[i] <- paste(output[i],ltrgrd)
+   }
+   # save to file for records
+   save(output,file="outfile")
+   write(output,file="GroupQuizGrades")
+   cat("\n","  letter grade results:","\n")
+   for (i in 1:length(output)) {
+      cat(output[i],"\n")
+   }
+   print("if not in office, upload outfile, GroupQuizGrades, RunCmdsGrpQuiz, .tex")
+}
+
+emailresults <- function() {
+   # if sending mail requires a password, remind the user
+   readline("set password externally (if any), then hit Enter")
+   load("outfile")
+   for (l in output) {
+      tmp <- strsplit(l," ")[[1]]
+      emailaddr <- tmp[1]
+      emailaddr <- paste(emailaddr,"@ucdavis.edu",sep="")
+      cat(l,file="onestudent")
+      tosend <- paste("mutt",emailaddr,"-s 'quiz results' < onestudent")
+      system(tosend)
+      # print(tosend)
+      print(l)
+      system("sleep 10")
+      system("/bin/rm onestudent")
+   }
+}
+
+# determines the letter gradeoff, based on the cutoffs cuts,lgs
+num2ltr <- function(tot,cuts,lgs) {
+   for (i in 1:length(cuts)) {
+      if (tot >= cuts[i]) return(lgs[i])
+   }
+   return("F")
+}
+
+# do quoted command cmd
+docmd <- function(cmd) {
+   eval(parse(text=cmd))
+}
+
+###  # evaluate the given R expression; note: set any needed globals,
+###  # including functions, at the R prompt before calling grader(); also
+###  # note: in principle, a student can put multiple R statements within one
+###  # line, separated by semicolons, but it is not recommended to have them
+###  # write full code, e.g. full functions--it almost always has syntax
+###  # errors etc.
+###  evalrstring <- function(toexec) {
+###     cat(toexec,file="tmpexec")
+###     sourceresult <- try(source("tmpexec"))
+###     if (class(sourceresult) == "try-error" || 
+###        !is.numeric(sourceresult$value)) {
+###        print("R parse error at:")
+###        print(toexec)
+###        return(NA)
+###     } else return(sourceresult$value)
+###  }
+
+# source("/Users/normanmatloff/AutoGrading/AutoGradeGroupQuiz.R")

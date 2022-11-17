@@ -1,0 +1,142 @@
+
+# script to semi-automate course grade assignment
+
+# assumes the following file structure in the current directory:
+
+#    EMailList:  e-mail addresses (here and below, minus @ucdavis.edu)
+#    Quiz*/Quiz*:  quiz grades, indexed by e-mail address; group quiz is
+#       in a Quizn directory, largest n
+#    Hwk/HwkGrades:  homework grades, indexed by e-mail address
+#    Project/ProjectGrades:  project grades, indexed by e-mail address
+#    ClassLists/FinalClassList:  final class list from registrar,
+#       modified using MakeEnrolledList.R; e-mail
+#       addresses are taken from here
+
+# for each student in FinalClassList, the script will:
+#     read in the quiz grades, and check for missing ones, assigning an
+#        M grade in each such case
+#     read in the homework grades
+#     read in the project grade
+#     append all of the above to the student record line
+#     append mean quiz GPA (bottom 2 quizzes dropped)
+#     append mean homework GPA 
+#     append overall GPA
+#     write extended record to stdout and outfilename
+
+# arguments:
+#    infilename:  class list from Registrar, processed by
+#                 MakeEnrolledList.R; comment lines (#) will be copied 
+#                 to the output but skipped in terms of processing
+#    outfilename:  the input file, with each line appended with quiz,
+#                  homework and project letter grades, then with quiz
+#                  GPA (bottom 2 quizzes dropped), homework GPA, and
+#                  overall GPA (0.70 and 0.30 weights)
+#    nquiz:  number of quizzes (including group quiz)
+#    nhwk:  number of homework assignments (excluding project)
+
+# comment lines are allowed in infilename, e.g. to note Extra Credit,
+# extenuating circumstances, etc.
+
+findgradeaverages <- function(infilename,outfilename,nquiz,nhwk) {
+   if (nquiz > 9) stop("max number of quizzes is 9")
+   ilines <- readLines(infilename)
+   for (iline in ilines) {
+      commentchar <- substr(iline,1,1)
+      if (commentchar == "#") {
+         print(iline)
+         next
+      }
+      ilparts <- strsplit(iline,split=" ")[[1]]
+      lil <- length(ilparts)
+      # extract e-mail address, to use as index into records
+      emailaddr <- ilparts[lil]
+      # get quiz grades
+      qzs <- getquizgrades(emailaddr,nquiz)  # notes missing quizzes too
+      iline <- paste(iline,Reduce(paste,qzs))
+      hwk <- gethwkgrades(emailaddr,nhwk)  
+      iline <- paste(iline,Reduce(paste,hwk))
+      proj <- getprojgrade(emailaddr)
+      iline <- paste(iline,proj)
+      qgpa <- getquizgpa(qzs)
+      iline <- paste(iline,qgpa)
+      hgpa <- gethwkgpa(hwk,proj)
+      iline <- paste(iline,hgpa)
+      coursegpa <- 0.70 * qgpa + 0.30 * hgpa
+      iline <- paste(iline,coursegpa)
+      print(iline)
+      cat(iline,"\n",file=outfilename,append=T)
+   }
+}
+
+getquizgrades <- function(emailaddr,nquiz) {
+   # remember that the group quiz is also in a Quizn directory
+   grds <- rep("M",nquiz)  # M means missing
+   cmd <- paste("grep",emailaddr,"Q*/Q*")
+   cmdout <- system(cmd,intern=T)
+   if (length(cmdout) == 0) {
+      msg <- paste("no quizzes found for",emailaddr)
+      stop(msg)
+   } 
+   for (cmdi in cmdout) {
+      quiznum <- as.integer(substr(cmdi,5,5))
+      if (!(quiznum %in% 1:nquiz)) stop("invalid quiz number")
+      qparts <- strsplit(cmdi,split=" ")[[1]]
+      grds[quiznum] <- qparts[length(qparts)]
+   }
+   grds
+}
+
+gethwkgrades <- function(emailaddr,nhwk) {
+   cmd <- paste("grep",emailaddr,"Hwk/HwkGrades")
+   cmdout <- system(cmd,intern=T)
+   if (length(cmdout) == 0) {
+      msg <- paste("no hwk found for",emailaddr)
+      stop(msg)
+   }
+   tmp <- strsplit(cmdout,split=" ")[[1]]
+   ltmp <- length(tmp)
+   tmp[(ltmp-nhwk+1):ltmp]
+}
+
+getprojgrade <- function(emailaddr) {
+   cmd <- paste("grep",emailaddr,"Project/ProjectGrades")
+   cmdout <- system(cmd,intern=T)
+   if (length(cmdout) == 0) {
+      msg <- paste("no project found for",emailaddr)
+      stop(msg)
+   }
+   tmp <- strsplit(cmdout,split=" ")[[1]]
+   tmp[2]
+}
+
+getquizgpa <- function(qzs) {
+   numgrds <- Map(ltrgrdtonumgrd,qzs)
+   numgrds <- as.double(numgrds)
+   numgrds <- sort(numgrds)
+   # remove 2 lowest letter grades
+   numgrds <- numgrds[-(1:2)]
+   mean(numgrds)
+}
+
+# get hwk GPA, including project
+gethwkgpa <- function(hwk,proj) {
+   hp <- c(hwk,proj)
+   numgrds <- Map(ltrgrdtonumgrd,hp)
+   numgrds <- as.double(numgrds)
+   mean(numgrds)
+}
+
+# e.g. A- to 3.7
+ltrgrdtonumgrd <- function(ltrgrd) {
+   ltr <- substr(ltrgrd,1,1)
+   if (ltr == "F" || ltr == "M") return(0)
+   code <- charmatch(ltr,LETTERS) 
+   grdpts <- 5 - code
+   if (nchar(ltrgrd) == 2) {
+      pm <- substr(ltrgrd,2,2)
+      tmp <- if (pm == "+") 0.3 else -0.3
+      grdpts <- grdpts + tmp
+   }
+   grdpts
+}
+

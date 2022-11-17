@@ -1,0 +1,55 @@
+function(emailaddr,sep) {
+   # remember may have a Quiz 0
+   cmd <- paste("grep",emailaddr,"Quizzes/Q*/Q*s")
+   cmdout <- system(cmd,intern=T)
+   if (length(cmdout) == 0) {
+      msg <- paste("no quizzes found for",emailaddr)
+      print(msg)
+      browser()
+   }
+   # Quiz 0, if any, will be tacked onto the right end
+   grds <- rep("M",nquiz)  # M means missing
+   # go through quizzes, 1 by 1
+   for (cmdi in cmdout) {
+      quiznum <- as.integer(substr(cmdi,13,13))
+      ## quizrange <- (1-quiz0):nquiz
+      ## if (!(quiznum %in% quizrange)) stop("invalid quiz number")
+      # get grade, in the last field
+      qparts <- blanksplit(cmdi,sep)
+      grade <- qparts[length(qparts)]
+      if (!(quiznum == 0)) {
+         grds[quiznum] <- grade
+      } else grds[nquiz] <- grade
+   }
+   numM <- sum(grds == 'M')
+   if (numM > 1) {
+      cmd <- paste0(emailaddr,':  number of M grades was ',numM)
+      warning(cmd)
+   }
+   grds  # will not include Quiz 0, if any
+}
+function(qzs,emailaddr,jobinterview) {
+   numgrds <- as.numeric(Map(ltrgrdtonumgrd,qzs))
+   numgrds <- as.double(numgrds)
+   numgrds <- sort(numgrds)
+   # remove ndrop lowest letter grades
+   numgrds <- numgrds[-(1:ndrop)]
+   # if (quiz0 && (quiz0grade > numgrds[1]))
+   #    numgrds[1] <- quiz0grade
+   # replace next-lowest one by "job interview" grade, if any (only if
+   # better than 3rd-lowest original grade)
+   if (jobinterview) {
+      cmd <- paste("grep",emailaddr,"JobInterview/Grades")
+      cmdout <- system(cmd,intern=T)
+      if (length(cmdout) > 0) {
+         jiGrade <- blanksplit(cmdout,' ')
+         jiGrade <- jiGrade[length(jiGrade)]
+         numJI <- ltrgrdtonumgrd(jiGrade)
+         # recall that numgrds is already sorted
+         minGrd <- numgrds[1]
+         if (numJI > minGrd) numgrds[1] <- numJI
+      }
+   }
+   mean(numgrds)
+}
+
